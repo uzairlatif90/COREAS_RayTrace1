@@ -1,0 +1,181 @@
+#!/bin/bash
+
+submitFile=MasterSubmitD
+if [ -f $submitFile ] ; then rm $submitFile ; fi
+
+dollar='$'
+commas='"'
+star='*'
+# thstep=10
+# phistep=20
+
+thstep=15
+phistep=90
+
+PRINT_ARG="#!/bin/bash"
+echo $PRINT_ARG >> $submitFile
+
+# for i in `seq 9 9`
+# do
+# for j in `seq 1 18`
+# do
+
+# for i in `seq 2 3`
+# do
+# for j in `seq 1 2`
+# do
+
+for i in `seq 2 5`
+do
+for j in `seq $((i)) $((i))`
+do
+for k in `seq 1 3`
+do
+
+# for i in `seq 2 2`
+# do
+# for j in `seq $((i)) $((i))`
+# do
+# for k in `seq 1 1`
+# do
+
+
+    
+    r1=$(((i-1)*thstep))
+    r2=$(((j-1)*phistep))
+    r3=$((k+16))
+
+    echo The th and phi values are ${r1} and ${r2} and energy is ${r3}
+    PRINT_ARG="theta=${r1}"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="phi=${r2}"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="EnExp=${r3}"
+    echo $PRINT_ARG >> $submitFile
+
+    PRINT_ARG="bash makeCoFile.sh ${dollar}{theta} ${dollar}{phi} ${dollar}{EnExp}"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="process_id=${dollar}!"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="wait ${dollar}process_id"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="echo Coordinate files made. Submitting job now  ${dollar}?"
+    echo $PRINT_ARG >> $submitFile
+    
+    PRINT_ARG="sbatch cor_submit4"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="checknum=0"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="while [ ${dollar}checknum -lt 1 ]"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="do"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="while squeue -u u259l848 | grep -lq 'u259l848' ; do"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="sleep 10; echo Job is running;"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="done"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="checknum=1;"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="echo Job finished;"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="done;"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="process_id=${dollar}!"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="wait ${dollar}process_id"
+    echo $PRINT_ARG >> $submitFile
+
+    PRINT_ARG="if [ ! -d ${commas}/home/u259l848/work/corsika_76900/run/SIM000002_coreas${commas} ]" 
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="then"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="echo ${commas}Job failed! Resubmitting job${commas}"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="sbatch cor_submit4"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="checknum=0"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="while [ ${dollar}checknum -lt 1 ]"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="do"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="while squeue -u u259l848 | grep -lq 'u259l848' ; do"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="sleep 10; echo Job is running;"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="done"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="checknum=1;"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="echo Job finished;"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="done;"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="process_id=${dollar}!"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="wait ${dollar}process_id"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="else"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="echo ${commas}Job does not need to be resubmitted${commas}"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="fi"
+    echo $PRINT_ARG >> $submitFile
+
+    PRINT_ARG="echo We are done! Job finished for ${dollar}{theta} ${dollar}{phi}. Copying stuff to the right folder ${dollar}?"
+    echo $PRINT_ARG >> $submitFile
+
+    PRINT_ARG="echo Making the directory /home/u259l848/work/corsika_76900/run/newruns/th${dollar}{theta}phi${dollar}{phi}EnExp${dollar}{EnExp}"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="mkdir -p -- ${commas}/home/u259l848/work/corsika_76900/run/newruns/th${dollar}{theta}phi${dollar}{phi}EnExp${dollar}{EnExp}${commas} "
+    echo $PRINT_ARG >> $submitFile
+    
+    PRINT_ARG="cp SIM000002.reas ./newruns/th${dollar}{theta}phi${dollar}{phi}EnExp${dollar}{EnExp}/"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="cp SIM000002.list ./newruns/th${dollar}{theta}phi${dollar}{phi}EnExp${dollar}{EnExp}/"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="cp RUN000002.inp ./newruns/th${dollar}{theta}phi${dollar}{phi}EnExp${dollar}{EnExp}/"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="cp RUN000002.log ./newruns/th${dollar}{theta}phi${dollar}{phi}EnExp${dollar}{EnExp}/"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="cp -R SIM000002_coreas ./newruns/th${dollar}{theta}phi${dollar}{phi}EnExp${dollar}{EnExp}/"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="process_id=${dollar}!"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="wait ${dollar}process_id"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="echo Files have been copied. Removing extra stuff ${dollar}?"
+    echo $PRINT_ARG >> $submitFile
+    
+    PRINT_ARG="rm corsika_timetable${star}"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="rm DAT000002${star}"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="rm DAT000002-${star}"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="rm SIM000002.list"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="rm SIM000002.reas"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="rm SIM000002-*"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="rm ${star}.bins"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="rm RUN000002.inp"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="rm RUN000002.log"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="rm -rf SIM000002_coreas"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="process_id=${dollar}!"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="wait ${dollar}process_id"
+    echo $PRINT_ARG >> $submitFile
+    PRINT_ARG="echo We are completely done! ${dollar}?"
+    echo $PRINT_ARG >> $submitFile
+
+done
+done
+done

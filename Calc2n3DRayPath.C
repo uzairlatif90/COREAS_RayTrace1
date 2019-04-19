@@ -1,0 +1,506 @@
+#include "TSystem.h"
+#include <iostream>
+#include <fstream>
+#include <string>
+#include "TGraph.h"
+#include "TMultiGraph.h"
+#include "TCanvas.h"
+#include "TMath.h"
+#include "TString.h"
+#include "TNtuple.h"
+#include "TAxis.h"
+#include "TStopwatch.h"
+#include "TStyle.h"
+
+//// Define your shower direction
+// Double_t ShowerTheta=45;
+// Double_t ShowerPhi=45;
+
+const Int_t NCH=16;
+const Double_t pi=4.0*atan(1.0); /**< Gives back value of Pi */
+const Double_t spedc=299792458.0; /**< Speed of Light in m/s */
+
+const Double_t A=1.78;/**< Value of Parameter A for SP model of refractive index */
+//////AraSim model
+const Double_t B=-0.43; /**< Value of Parameter B for SP model of refractive index */
+const Double_t C=0.0132;/**< Value of Parameter A for SP model of refractive index. There will be a negative sign for postive depth depth. */ 
+
+//////spice core ARIANNA model
+// const Double_t B=-0.427; /**< Value of Parameter B for SP model of refractive index */
+// const Double_t C=1.0/71.0;/**< Value of Parameter A for SP model of refractive index. There will be a negative sign for postive depth depth. */ 
+
+//More temperature and Lattenuation models in TF1s fFr1 and fFr2:
+//Temperature model:Takes in value of depth z and returns the value of temperature.
+//The temperature model has been taken from AraSim which also took it from here http://icecube.wisc.edu/~mnewcomb/radio/atten/ . This is basically Matt Newcomb's icecube directory which has alot of information, plots and codes about South Pole Ice activities. Please read it if you find it interesting.
+// http://icecube.wisc.edu/~mnewcomb/radio/#iceabsorbtion
+
+//Lattenuation model: Takes in value of frequency in Ghz and depth z and returns you the value of attenuation length.
+
+Double_t x[NCH][1000];
+Double_t y[NCH][1000];
+Double_t z[NCH][1000];
+Double_t num[NCH];
+
+////Coordinates of ARA02 in magnetic coordinate system
+Double_t antcor[16][3]={{10.2887,3.4243,-170.247},{5.8998,-9.84134,-170.347},{-3.5362,9.06135,-171.589},{-7.38,-4.84616,-175.377},{10.2887,3.42389,-189.502},{5.89974,-9.84175,-189.4},{-3.53626,9.06094,-190.642},{-7.38016,-4.84648,-194.266},{10.2919,3.39406,-167.492},{5.8998,-9.84134,-167.428},{-3.53621,9.06145,-168.468},{-7.38001,-4.84606,-172.42},{10.2887,3.42399,-186.546},{5.89974,-9.84175,-186.115},{-3.53626,9.06094,-187.522},{-7.37996,-4.84646,-190.981}};
+    
+////Store the x and z coordinates of the hit point in these arrays
+Double_t zerox[NCH];
+Double_t zeroz[NCH];
+
+Double_t Lang[NCH];////Store the launch angle values of each of the 16 rays
+Double_t lvaluesD[NCH]; ////Store the L values of each of the 16 rays
+
+////Define CoREAS and CORSIKA input files
+ofstream aout1("SIM000002.reas");
+ofstream aout2("RUN000002.inp");
+ofstream aout3("SIM000002.list");
+
+void Calc3DRayPath(TF1 *fDn,Double_t ShowerTheta, Double_t ShowerPhi, Double_t ShowerExp,Bool_t plotHitPtPos,Bool_t plotRaysIn3D,Bool_t SaveplotRaysIn3D,Bool_t plotRaysIn2D,Bool_t Option_curvout,Double_t Obslev,Bool_t Option_obslev);
+  
+void Calc2n3DRayPath(Double_t ShowerTheta, Double_t ShowerPhi, Double_t ShowerExp){
+  
+  Double_t Shower_ang=ShowerTheta*(pi/180.0);
+  Double_t langS=asin((1.0/(A+B))*sin(Shower_ang));
+  
+  ////Plot the ray solutions
+  Bool_t plotHitPtPos=true;////Plot the hit points on the ice surface. Gives you back an X-Y plot of the hit points
+  Bool_t plotRaysIn3D=true;////Plot rays in 3D with the station Antennas
+  Bool_t SaveplotRaysIn3D=false;////Save the 3D plot
+  Bool_t plotRaysIn2D=false;  
+
+  ////calculate the attenuation
+  Bool_t attcal=false;
+
+  Bool_t Option_obslev=true;////Set the observation level. This defines how low will corsika propogate its particles. According to Tim Huege: In fact, for inclined air showers, you should set the observation level in CORSIKA lower than the observation level of your radio antennas,
+  Double_t Obslev=0;////Set How low you want to below the ice surface.
+  if(Option_obslev==true){
+    Obslev=220*100;////in cm
+  }
+
+  Bool_t Option_curvout=false;
+  if(ShowerTheta>70){
+    Option_curvout=true;////activate the curvout option for really inclined showers. Read footnote 64 on page 68 of CORSIKA manual
+  }
+  
+  ////Define dummy 2-D coordinates for use
+  Double_t x0=0;
+  Double_t z0=-200;
+  Double_t x1=0;
+  Double_t z1=-0.00001;
+  
+  Double_t langD=0;
+  Double_t lvalueD=0;
+  Double_t timeD=0;
+  Double_t RangD=0;
+  
+  //Ray path function x(z) for direct ray
+  TF1 * fD=new TF1("fD","([3]/[2])*(1.0/sqrt([0]*[0]-[3]*[3]))*([2]*x-log([0]*([0]+[1]*exp([2]*x))-[3]*[3]+sqrt([0]*[0]-[3]*[3])*sqrt(pow([0]+[1]*exp([2]*x),2)-[3]*[3])))",-200000, -1*pow(10,-9));
+  fD->FixParameter(0,A);
+  fD->FixParameter(1,B);
+  fD->FixParameter(2,C);
+  fD->SetParameter(3,1.5);
+
+  ////Define the function that will be minimised to calculate the angle of entry (or the launch angle) and the hit point of the ray on the ice surface such that it hits the antenna when it enters the ice
+  TF1 * fDerL=new TF1("fDerL","tan(asin( (([0]+[1]*exp([2]*[5]))*sin(x))/([0]+[1]*exp([2]*[4])) ) ) - [3]",0,90*(pi/180));
+  fDerL->FixParameter(0,A);
+  fDerL->FixParameter(1,B);
+  fDerL->FixParameter(2,C);
+  fDerL->FixParameter(3,tan(langS));
+
+  ////The function used to calculate propogation time in ice
+  TF1 * ftimeD=new TF1("ftimeD","(1.0/([3]*[2]*sqrt(pow([0]+[1]*exp(x*[2]),2)-[4]*[4])))*(pow([0]+[1]*exp(x*[2]),2)-[4]*[4]+([2]*x-log([0]*([0]+[1]*exp([2]*x))-[4]*[4]+sqrt([0]*[0]-[4]*[4])*sqrt(pow([0]+[1]*exp([2]*x),2)-[4]*[4])))*([0]*[0]*sqrt(pow([0]+[1]*exp(x*[2]),2)-[4]*[4]))/sqrt([0]*[0]-[4]*[4]) +[0]*sqrt(pow([0]+[1]*exp(x*[2]),2)-[4]*[4])*log([0]+[1]*exp(x*[2])+sqrt(pow([0]+[1]*exp(x*[2]),2)-[4]*[4])) )",1*pow(10,-9),200000);
+  ftimeD->FixParameter(0,A);
+  ftimeD->FixParameter(1,B);
+  ftimeD->FixParameter(2,-C);
+  ftimeD->FixParameter(3,spedc);
+
+  ////Calculate launch angle and hit points for all channels in ice
+  for(Int_t ich=0;ich<NCH;ich++){
+
+    //calculate the launch angle
+    z0=antcor[ich][2];
+    fDerL->SetParameter(4,z1);
+    fDerL->SetParameter(5,z0);
+    cout<<"the launch angle should be "<<(fDerL->GetX(0))*(180/pi)<<endl;
+
+    ////calculate the distance of the hit point
+    langD=(fDerL->GetX(0));
+    fD->SetParameter(3,(A+B*exp(C*(z0)))*sin(langD));
+    lvalueD=(A+B*exp(C*(z0)))*sin(langD);
+    x1=fD->Eval(-0.0001)-fD->Eval(z0);
+    cout<<"The hit point distance is "<<x1<<" m from the antenna "<<ich<<" on the surface"<<endl; 
+
+    ////calculate the time
+    ftimeD->SetParameter(4,lvalueD);
+    timeD=ftimeD->Eval(-z0)-ftimeD->Eval(-z1);
+    cout<<"The D time is: "<<timeD<<endl;
+
+    /////calculate the recieve angle
+    fD->SetParameter(3,lvalueD);
+    RangD=atan(fD->Derivative(z1,0,1*pow(10,-9)))*(180.0/pi);
+    if(z1==z0 && TMath::IsNaN(RangD)==true){
+      RangD=180-langD;
+    }
+
+    if(z1!=z0 && TMath::IsNaN(RangD)==true){
+      RangD=90;
+    }
+    ////Store the lvalues or the launch angle values of each of the 16 rays
+    lvaluesD[ich]=lvalueD;
+    
+    ////Store the x and z coordinates of the hit point in these arrays
+    zerox[ich]=x1;
+    zeroz[ich]=z1;
+  }
+  
+  
+  if(attcal==true){
+    const Double_t f0=0.0001, f2=3.16;
+    //Calculate the attenuation
+    // for frequency<1.Ghz. This is the integrand
+    TF1 *fFr1=new TF1("fFr1","sqrt(1+pow(tan(asin([6]/([3]+[4]*exp([5]*x)))),2))*exp((((-6.22121-(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*(0.070927+(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*0.001773))*[0]-(-6.74890+(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*(0.026709-(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*0.000884))*[1])/([0]-[1]))+(((-6.22121-(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*(0.070927+(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*0.001773))-(-6.74890+(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*(0.026709-(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*0.000884)))/([1]-[0]))*[2])",-20000,0);
+    
+    fFr1->SetParameter(0,log10(f0));
+    fFr1->SetParameter(1,0.0);
+    fFr1->FixParameter(3,A);
+    fFr1->FixParameter(4,B);
+    fFr1->FixParameter(5,C);
+    
+    //loop over the different frequencies
+    for(Int_t iat=0;iat<10;iat++){
+      //set the frequency in Ghz
+      fFr1->SetParameter(2,log10(0.1+iat*0.1));
+
+      //Calculate attenuation for direct ray
+      fFr1->SetParameter(6,lvalueD);
+      Double_t totattD=1-fFr1->Integral(z0,z1);
+
+      delete fFr1;
+    }
+  
+  // //for frequency>1.0Ghz
+  // TF1 *fFr2=new TF1("fFr2","exp((((-4.09468-(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*(0.002213+(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*0.000332))*[0]-(-6.22121-(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*(0.070927+(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*0.001773))*[1])/([0]-[1]))+(((-4.09468-(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*(0.002213+(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*0.000332))-(-6.22121-(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*(0.070927+(-51.5 + x*(-4.5319e-3 + 5.822e-6*x))*0.001773)))/([1]-[0]))*[2])",1,3);
+  // fFr2->SetParameter(0,0.0);
+  // fFr2->SetParameter(1,log10(f2));
+  // fFr2->SetParameter(2,log10(1.5));
+  }
+  
+  //cout<<0<<" ,x0= "<<x0<<" ,z0= "<<z0<<" ,x1= "<<x1<<" ,z1= "<<z1<<" ,langD= "<<langD<<" ,RangD= "<<RangD<<" ,timeD= "<<timeD<<" ,lvalueD "<<lvalueD<<endl;
+  
+  Calc3DRayPath(fD,ShowerTheta,ShowerPhi,ShowerExp,plotHitPtPos,plotRaysIn3D,SaveplotRaysIn3D,plotRaysIn2D,Option_curvout,Obslev,Option_obslev);
+ 
+  delete fDerL;
+  delete ftimeD;
+  
+}
+
+void Calc3DRayPath(TF1 *fDn, Double_t ShowerTheta, Double_t ShowerPhi,Double_t ShowerExp,Bool_t plotHitPtPos,Bool_t plotRaysIn3D,Bool_t SaveplotRaysIn3D,Bool_t plotRaysIn2D,Bool_t Option_curvout,Double_t Obslev,Bool_t Option_obslev){
+
+  ////Define dummy source and target coordinates
+  Double_t x0=0;
+  Double_t z0=-200;
+  Double_t x1=0;
+  Double_t z1=-0.00001;
+  
+  Double_t h=1;////Define step size in m for plotting rays
+  const Int_t dmax=-round(z0/h);//// define the max step size
+
+  ////Dummy variables for ray path calculation
+  Double_t zn=z1;
+  Int_t inum=0;
+  Double_t x0n=0;
+  Double_t z0n=0;
+  
+  for(Int_t ich=0;ich<NCH;ich++){
+    z0=antcor[ich][2];
+    zn=z1;
+    inum=0;
+    
+    ////Start from somehwere above the ice and start tracing the ray downwards to the hit point
+    ////Here I define the start points in the sky
+    x0n=200*tan(ShowerTheta*(pi/180))+zerox[ich];
+    z0n=(200.0+zerox[ich])/tan(ShowerTheta*(pi/180));
+    if(z0n>200){
+      z0n=200;
+    }
+    if(x0n>200){
+      x0n=z0n*tan(ShowerTheta*(pi/180))+zerox[ich];
+    }
+
+    ////Trace the ray down from the sky to the ice
+    for(Int_t i=0;i<1000;i++){
+      x0n=x0n-h*fabs(cos((90-ShowerTheta)*(pi/180)) );
+      z0n=z0n-h*fabs(sin((90-ShowerTheta)*(pi/180)) );
+    
+      if(x0n>0 && z0n>0){
+	x[ich][inum]=x0n;
+	z[ich][inum]=z0n;
+	num[ich]=inum;
+	inum++;
+      }else{
+	i=1002;
+      }
+    }
+
+    ////Trace the ray from the hit point to the antenna
+    fDn->SetParameter(3,lvaluesD[ich]);
+    for(Int_t i=inum;i<dmax+inum;i++){
+      if(TMath::IsNaN(fDn->Eval(zn))==false){
+	x[ich][i]=fDn->Eval(zn)-fDn->Eval(z0);
+	z[ich][i]=zn;
+	inum++;
+      }
+      zn=zn-h;
+      if(zn<z0){
+	zn=z0;
+	x[ich][i+1]=0;
+	z[ich][i+1]=z0;
+	num[ich]=inum+1;
+	i=dmax+inum+2;      
+      }  
+    }
+  
+  }
+
+  ////Define Ntuples for plotting
+  TNtuple *ntuple[NCH]; 
+  for(Int_t ich=0;ich<NCH+5;ich++){
+    ntuple[ich]=new TNtuple("","","x1:x2:x3");
+  }
+
+  ////Transform the 2D ray paths into 3D ray paths by rotating them and shifting them accordingly
+  Double_t dummytot=0;
+  for(Int_t ich=0;ich<NCH;ich++){
+    for(Int_t inum=0;inum<num[ich];inum++){
+      dummytot=sqrt(x[ich][inum]*x[ich][inum]);
+      x[ich][inum]=dummytot*cos(ShowerPhi*(pi/180.0))+antcor[ich][0];
+      y[ich][inum]=dummytot*sin(ShowerPhi*(pi/180.0))+antcor[ich][1];
+
+      ////Fill in the 3D ray paths for plotting
+      ntuple[ich]->Fill(z[ich][inum],y[ich][inum],x[ich][inum]);
+    }
+    dummytot=sqrt(zerox[ich]*zerox[ich]);
+
+    ////Fill in the hit points on the ice
+    ntuple[17]->Fill(zeroz[ich],dummytot*sin(ShowerPhi*(pi/180.0))+antcor[ich][1],dummytot*cos(ShowerPhi*(pi/180.0))+antcor[ich][0]);
+
+    ////Fill in the antenna positions in the ice
+    if(ich<8){
+      ntuple[18]->Fill(antcor[ich][2],antcor[ich][1],antcor[ich][0]);
+    }
+    if(ich>7){
+      ntuple[19]->Fill(antcor[ich][2],antcor[ich][1],antcor[ich][0]);
+    }
+  }
+
+  ////Fill the origin point
+  ntuple[17]->Fill(0,0,0);   
+  
+  ////Fill in points for the ice surface
+  for(Int_t inumx=0;inumx<200;inumx++){
+    for(Int_t inumy=0;inumy<200;inumy++){
+      ntuple[16]->Fill(0,200-2.0*inumy,200-2.0*inumx);
+    }
+  }
+
+  ////Fill in the points to define the max dimensions of the plot
+  ntuple[16]->Fill(-200,0,0);
+  ntuple[16]->Fill(200,0,0);
+
+  ////define Ntuple to store and plot ice hit point positions in ice
+  TNtuple *hcntuple=new TNtuple("","","x1:x2");
+
+  ////Define variables for finding shower core positions
+  Double_t xsum=0;
+  Double_t ysum=0;
+  
+  cout<<"The hit points on the ice are "<<endl;
+  for(Int_t ich=0;ich<NCH;ich++){
+    dummytot=zerox[ich];
+    xsum+=dummytot*cos(ShowerPhi*(pi/180.0))+antcor[ich][0];
+    ysum+=dummytot*sin(ShowerPhi*(pi/180.0))+antcor[ich][1];
+
+    ////File in the .list file for CoREAS
+    cout<<"AntennaPosition= "<<(dummytot*cos(ShowerPhi*(pi/180.0))+antcor[ich][0])*100<<" "<<(dummytot*sin(ShowerPhi*(pi/180.0))+antcor[ich][1])*100<<" "<<(9312*0.3048-5.71)*100<<" ch"<<ich<<endl;
+    aout3<<"AntennaPosition= "<<(dummytot*cos(ShowerPhi*(pi/180.0))+antcor[ich][0])*100<<" "<<(dummytot*sin(ShowerPhi*(pi/180.0))+antcor[ich][1])*100<<" "<<(9312*0.3048-5.71)*100<<" ch"<<ich<<endl;
+
+    hcntuple->Fill((dummytot*cos(ShowerPhi*(pi/180.0))+antcor[ich][0]),(dummytot*sin(ShowerPhi*(pi/180.0))+antcor[ich][1]));
+  }
+
+  //Find Shower core position
+  xsum=xsum/NCH;
+  ysum=ysum/NCH;
+  ntuple[20]->Fill(0,ysum,xsum);
+  cout<<"The Shower core position is "<<xsum*100<<" "<<ysum*100<<" "<<(9312*0.3048-5.71)*100<<endl;
+  
+  hcntuple->SetMarkerStyle(20);
+  hcntuple->SetMarkerColor(5);
+
+  
+  if(plotHitPtPos==true){
+    TCanvas * chc=new TCanvas("chc","chc");
+    chc->cd();
+    hcntuple->Draw("x1:x2","","");
+  }
+  
+  cout<<"Hit points w.r.t to shower core if the origin is set at the core: "<<endl;
+  for(Int_t ich=0;ich<NCH;ich++){
+    dummytot=zerox[ich];
+    cout<<ich<<" "<<(dummytot*cos(ShowerPhi*(pi/180.0))+antcor[ich][0]-xsum)*100<<" "<<(dummytot*sin(ShowerPhi*(pi/180.0))+antcor[ich][1]-ysum)*100<<" "<<(9312*0.3048-5.71)*100<<endl;
+  }
+  
+  TH3D * h3=new TH3D("h3","h3",200,-200,200,200,-200,200,200,-200,200);
+  h3->GetXaxis()->SetTitle("X axis (m)");
+  h3->GetXaxis()->SetTitleOffset(2);
+  h3->GetYaxis()->SetTitle("Y axis (m)");
+  h3->GetYaxis()->SetTitleOffset(2);
+  h3->GetZaxis()->SetTitle("Z axis (m)");
+  h3->GetZaxis()->SetTitleOffset(1.2);
+  h3->SetTitle(";X axis (m);Y axis (m);Z axis (m)");
+  h3->SetMarkerColor(37);
+
+  ntuple[20]->SetMarkerStyle(20);
+  ntuple[20]->SetMarkerColor(6);
+  
+  ntuple[19]->SetMarkerStyle(21);
+  ntuple[19]->SetMarkerColor(4);
+  
+  ntuple[18]->SetMarkerStyle(21);
+  ntuple[18]->SetMarkerColor(2);
+  
+  ntuple[17]->SetMarkerStyle(20);
+  ntuple[17]->SetMarkerColor(1);
+  
+  ntuple[16]->SetMarkerColor(37);  
+  
+  if(plotRaysIn3D==true){
+    TCanvas *c1=new TCanvas("c1","c1");
+    c1->cd();
+    
+    h3->SetStats(0);
+    ntuple[16]->Draw("x1:x2:x3>>h3","","");
+    ntuple[17]->Draw("x1:x2:x3","","SAME");
+    ntuple[18]->Draw("x1:x2:x3","","SAME");
+    ntuple[19]->Draw("x1:x2:x3","","SAME");
+    ntuple[20]->Draw("x1:x2:x3","","SAME");
+    
+    for(Int_t ich=0;ich<NCH;ich++){
+      ntuple[ich]->SetMarkerColor(30);
+      ntuple[ich]->Draw("x1:x2:x3","","SAME");
+    }
+    
+    gPad->SetTheta(30); // default is 30
+    gPad->SetPhi(210); // default is 30
+    
+    gPad->Update();
+
+    if(SaveplotRaysIn3D==true){
+      ////Save the 3D rayplot
+      const char* filename;
+      TString filen="theta=";
+      filen+=ShowerTheta;
+      filen+="_phi=";
+      filen+=ShowerPhi;
+      filen+="_En=";
+      filen+=ShowerExp;
+      filen+=".pdf";
+      
+      filename=filen.Data();
+      c1->SaveAs(filename);
+    }
+  }
+
+  if(plotRaysIn2D==true){
+    TCanvas *c2=new TCanvas("c2","c2");
+    c2->cd();
+    
+    TGraph *gr[NCH];
+    TMultiGraph *mg=new TMultiGraph();
+    for(Int_t ich=0;ich<NCH;ich++){
+      gr[ich]=new TGraph(num[ich],x[ich],z[ich]);
+      gr[ich]->SetLineColor(ich+1);
+      if(ich+1==10){
+	gr[ich]->SetLineColor(46);
+      }
+      mg->Add(gr[ich]);
+    }
+    
+    TString title="Hit positions on ice";
+    title+=";X;Z";
+    mg->SetTitle(title);
+    mg->Draw("AL"); 
+  }
+
+  aout1<<"# CoREAS V1 by Tim Huege <tim.huege@kit.edu> with contributions by Marianne Ludwig and Clancy James - parameter file"<<endl;
+  aout1<<endl;
+  aout1<<"# parameters setting up the spatial observer configuration:"<<endl;
+  aout1<<endl;
+  aout1<<"CoreCoordinateNorth = "<<xsum*100<<"			; in cm"<<endl;
+  aout1<<"CoreCoordinateWest = "<<ysum*100<<"			; in cm"<<endl;
+  aout1<<"CoreCoordinateVertical = "<<(9312*0.3048-5.71)*100<<"			; in cm"<<endl;
+  aout1<<endl;
+  aout1<<"# parameters setting up the temporal observer configuration:"<<endl;
+  aout1<<endl;
+  aout1<<"TimeResolution = 2e-10				; in s"<<endl;
+  aout1<<"AutomaticTimeBoundaries = 4e-07			; 0: off, x: automatic boundaries with width x in s"<<endl;
+  aout1<<"TimeLowerBoundary = -1				; in s, only if AutomaticTimeBoundaries set to 0"<<endl;
+  aout1<<"TimeUpperBoundary = 1				; in s, only if AutomaticTimeBoundaries set to 0"<<endl;
+  aout1<<"ResolutionReductionScale = 0			; 0: off, x: decrease time resolution linearly every x cm in radius"<<endl;
+  aout1<<endl;
+  aout1<<"# parameters setting up the simulation functionality:"<<endl;
+  aout1<<"GroundLevelRefractiveIndex = 1.000292		; specify refractive index at 0 m asl"<<endl;
+  aout1<<endl;
+  aout1<<"# event information for your convenience and backwards compatibility with other software, these values are not used as input parameters for the simulation:"<<endl;
+  aout1<<endl;
+  aout1<<"ShowerZenithAngle = "<<ShowerTheta<<"				; in degrees"<<endl;
+  aout1<<"ShowerAzimuthAngle = "<<ShowerPhi<<"				; in degrees, 0: shower propagates to north, 90: to west"<<endl;
+  aout1<<"PrimaryParticleEnergy = "<<1e+19<<"			; in eV"<<endl;
+  aout1<<"PrimaryParticleType = 14			; as defined in CORSIKA"<<endl;
+  aout1<<"DepthOfShowerMaximum = -1			; slant depth in g/cm^2"<<endl;
+  aout1<<"DistanceOfShowerMaximum = -1			; geometrical distance of shower maximum from core in cm"<<endl;
+  aout1<<"MagneticFieldStrength = 0.2300005511		; in Gauss"<<endl;
+  aout1<<"MagneticFieldInclinationAngle = -36.99445254	; in degrees, >0: in northern hemisphere, <0: in southern hemisphere"<<endl;
+  aout1<<"GeomagneticAngle = 79.1654			; in degrees"<<endl;
+  aout1<<"CorsikaFilePath = ./"<<endl;
+  aout1<<"CorsikaParameterFile = RUN000002.inp"<<endl;
+
+  aout2<<"RUNNR   2"<<endl;
+  aout2<<"EVTNR   2"<<endl;
+  aout2<<"SEED    1 0 0"<<endl;
+  aout2<<"SEED    2 0 0"<<endl;
+  aout2<<"SEED    3 0 0"<<endl;
+  aout2<<"PARALLEL 1.000E+"<<ShowerExp-14<<" 1.000E+"<<ShowerExp-12<<" 1 T"<<endl;
+  aout2<<"PRMPAR  14"<<endl;
+  aout2<<"ERANGE  1.000E+"<<ShowerExp-9<<" 1.000E+"<<ShowerExp-9<<endl;
+  aout2<<"ESLOPE  0.000E+00"<<endl;
+  aout2<<"THETAP  "<<ShowerTheta<<"  "<<ShowerTheta<<endl;
+  aout2<<"PHIP    "<<ShowerPhi<<"  "<<ShowerPhi<<endl;
+  aout2<<"ECUTS   3.000E-01 3.000E-01 4.010E-04 4.010E-04"<<endl;
+  aout2<<"ELMFLG  T  T"<<endl;
+  aout2<<"THIN    1.000E-06 1.000E+02 0.000E+00"<<endl;
+  aout2<<"THINH   1.000E+00 1.000E+02"<<endl;
+  aout2<<"NSHOW   1"<<endl;
+  aout2<<"USER    uzair"<<endl;
+  aout2<<"HOST    iklxds69"<<endl;
+  aout2<<"DIRECT  /home/u259l848/work/corsika_76900/run/"<<endl;
+  if(Option_obslev==true){
+    aout2<<"OBSLEV  "<<283259.0-Obslev<<endl;
+  }
+  aout2<<"ECTMAP  1.000E+05"<<endl;
+  aout2<<"STEPFC  1.000E+00"<<endl; 
+  aout2<<"MUMULT  T"<<endl;
+  if(Option_curvout==true){
+    aout2<<"CURVOUT T"<<endl;
+  }
+  aout2<<"MUADDI  T"<<endl;
+  aout2<<"PAROUT  F  F"<<endl;
+  aout2<<"MAXPRT  1"<<endl;
+  aout2<<"MAGNET  16.7525 -52.0874"<<endl;
+  aout2<<"LONGI   T    5.  T  T"<<endl;
+  aout2<<"RADNKG  5.000E+05"<<endl;
+  aout2<<"DATBAS  F"<<endl;
+  aout2<<"ATMFILE /home/u259l848/work/corsika_76900/run/Atmosphere.dat"<<endl;
+  aout2<<"EXIT"<<endl;
+  
+}
